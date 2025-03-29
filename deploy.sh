@@ -79,6 +79,11 @@ build_images() {
   docker build -t ${REGISTRY}/microvm-poc/ui-service-1:latest ./ui-service-1
   docker push ${REGISTRY}/microvm-poc/ui-service-1:latest
   
+  # Build and push log analyzer service
+  print_step "Building log-analyzer..."
+  docker build -t ${REGISTRY}/microvm-poc/log-analyzer:latest ./log-analyzer
+  docker push ${REGISTRY}/microvm-poc/log-analyzer:latest
+  
   echo "All Docker images built and pushed to registry."
 }
 
@@ -121,9 +126,25 @@ provision:
       if ! command -v docker >/dev/null 2>&1; then
         export DEBIAN_FRONTEND=noninteractive
         apt-get update
-        apt-get install -y apt-transport-https ca-certificates curl software-properties-common
+        apt-get install -y apt-transport-https ca-certificates curl software-properties-common gnupg
+        
+        # Use a more portable approach to determine architecture and release
+        ARCH=$(uname -m)
+        case $ARCH in
+          x86_64) ARCH="amd64" ;;
+          aarch64) ARCH="arm64" ;;
+        esac
+        
+        # Determine Ubuntu release without lsb_release
+        if [ -f /etc/os-release ]; then
+          . /etc/os-release
+          RELEASE=$VERSION_CODENAME
+        else
+          RELEASE="focal"  # Default to focal if we can't determine
+        fi
+        
         curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+        echo "deb [arch=$ARCH signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $RELEASE stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
         apt-get update
         apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
         usermod -aG docker lima
@@ -131,7 +152,15 @@ provision:
       
       # Install kubectl
       if ! command -v kubectl >/dev/null 2>&1; then
-        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/$(dpkg --print-architecture)/kubectl"
+        # Determine architecture without dpkg
+        ARCH=$(uname -m)
+        case $ARCH in
+          x86_64) KUBECTL_ARCH="amd64" ;;
+          aarch64) KUBECTL_ARCH="arm64" ;;
+          *) KUBECTL_ARCH="amd64" ;;
+        esac
+        
+        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/${KUBECTL_ARCH}/kubectl"
         chmod +x kubectl
         mv kubectl /usr/local/bin/
       fi
@@ -142,7 +171,15 @@ provision:
   "insecure-registries": ["localhost:5001", "localhost:5001"]
 }
 EOF
-      systemctl restart docker
+      # Use service command instead of systemctl if available
+      if command -v systemctl >/dev/null 2>&1; then
+        systemctl restart docker
+      elif command -v service >/dev/null 2>&1; then
+        service docker restart
+      else
+        # Last resort: try to restart docker directly
+        pkill -SIGHUP dockerd
+      fi
 EOF
     
     # Start the VM
@@ -221,6 +258,19 @@ deploy_application() {
   print_step "Deploying observability stack..."
   kubectl apply -f ./k8s/observability.yaml
   
+  # Deploy log monitoring and analysis components
+  print_step "Deploying Elasticsearch..."
+  kubectl apply -f ./k8s/elasticsearch.yaml
+  
+  print_step "Deploying Kibana..."
+  kubectl apply -f ./k8s/kibana.yaml
+  
+  print_step "Deploying log collection system..."
+  kubectl apply -f ./k8s/log-collection.yaml
+  
+  print_step "Deploying LLM-based log analyzer..."
+  kubectl apply -f ./k8s/log-analyzer.yaml
+  
   # Wait for deployments to be ready
   print_step "Waiting for deployments to be ready..."
   kubectl -n $NAMESPACE wait --for=condition=available deployment --all --timeout=300s
@@ -239,7 +289,7 @@ configure_hosts() {
   if ! grep -q "microvm-poc.local" /etc/hosts; then
     sudo tee -a /etc/hosts > /dev/null <<EOF
 # MicroVM POC entries
-$MASTER_IP dashboard.microvm-poc.local api.microvm-poc.local monitoring.microvm-poc.local
+$MASTER_IP dashboard.microvm-poc.local api.microvm-poc.local monitoring.microvm-poc.local logs.microvm-poc.local
 EOF
     echo "Hosts file updated."
   else
@@ -257,10 +307,20 @@ print_access_info() {
   echo "- Dashboard: http://dashboard.microvm-poc.local"
   echo "- API Gateway: http://api.microvm-poc.local"
   echo "- Monitoring: http://monitoring.microvm-poc.local"
+  echo "- Log Dashboard: http://logs.microvm-poc.local"
   echo ""
   echo "Grafana credentials:"
   echo "- Username: admin"
   echo "- Password: admin"
+  echo ""
+  echo "Kibana credentials:"
+  echo "- Username: elastic"
+  echo "- Password: changeme"
+  echo ""
+  echo "LLM-based Log Analysis:"
+  echo "- The system automatically analyzes logs using Gemini 2.5 Pro"
+  echo "- It can automatically restart services, update resources, or suggest code fixes"
+  echo "- View analysis results in Kibana or Prometheus metrics"
   echo ""
   echo "To view the status of your services:"
   echo "kubectl -n $NAMESPACE get all"

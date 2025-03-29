@@ -1,0 +1,9 @@
+flask==2.3.3
+requests==2.31.0
+pyyaml==6.0.1
+kubernetes==28.1.0
+google-generativeai==0.3.1
+prometheus-client==0.17.1
+elasticsearch==8.10.0
+fluent-logger==0.10.0
+python-json-logger==2.0.7
