@@ -1,0 +1,86 @@
+version: '3.8'
+
+services:
+  # API Service 1 - User Management
+  api-service-1:
+    build:
+      context: ./api-service-1
+      dockerfile: Dockerfile
+      target: development # Use development stage for local testing
+    ports:
+      - "3001:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - SERVICE_NAME=user-service
+    volumes:
+      - ./api-service-1:/usr/src/app
+      - /usr/src/app/node_modules
+    command: npm run start:dev
+    restart: unless-stopped
+
+  # API Service 2 - Product Management
+  api-service-2:
+    build:
+      context: ./api-service-2
+      dockerfile: Dockerfile
+      target: development
+    ports:
+      - "3002:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - SERVICE_NAME=product-service
+    volumes:
+      - ./api-service-2:/usr/src/app
+      - /usr/src/app/node_modules
+    command: npm run start:dev
+    restart: unless-stopped
+
+  # API Service 3 - Order Management
+  api-service-3:
+    build:
+      context: ./api-service-3
+      dockerfile: Dockerfile
+      target: development
+    ports:
+      - "3003:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - SERVICE_NAME=order-service
+      - USER_SERVICE_URL=http://api-service-1:3000
+      - PRODUCT_SERVICE_URL=http://api-service-2:3000
+    volumes:
+      - ./api-service-3:/usr/src/app
+      - /usr/src/app/node_modules
+    command: npm run start:dev
+    restart: unless-stopped
+    depends_on:
+      - api-service-1
+      - api-service-2
+
+  # UI Service 1 - Dashboard
+  ui-service-1:
+    build:
+      context: ./ui-service-1
+      dockerfile: Dockerfile
+    ports:
+      - "8001:80"
+    volumes:
+      - ./ui-service-1/public:/usr/share/nginx/html
+    restart: unless-stopped
+    depends_on:
+      - api-service-1
+      - api-service-2
+      - api-service-3
+
+  # We'll add more services as we create them
+  # api-service-4:
+  # api-service-5:
+  # ui-service-2:
+  # ui-service-3:
+
+networks:
+  default:
+    name: microvm-network

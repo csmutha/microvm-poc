@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ui-service-1
+  namespace: microvm-poc
+  labels:
+    app: ui-service-1
+    service: dashboard
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ui-service-1
+  template:
+    metadata:
+      labels:
+        app: ui-service-1
+        service: dashboard
+    spec:
+      containers:
+      - name: ui-service-1
+        image: localhost:5001/microvm-poc/ui-service-1:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 80
+        env:
+        - name: REACT_APP_USER_API_URL
+          value: "http://api-gateway/api/v1/users"
+        - name: REACT_APP_PRODUCT_API_URL
+          value: "http://api-gateway/api/v1/products"
+        - name: REACT_APP_ORDER_API_URL
+          value: "http://api-gateway/api/v1/orders"
+        resources:
+          limits:
+            cpu: "0.3"
+            memory: "256Mi"
+          requests:
+            cpu: "0.1"
+            memory: "128Mi"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ui-service-1
+  namespace: microvm-poc
+  labels:
+    app: ui-service-1
+    service: dashboard
+spec:
+  selector:
+    app: ui-service-1
+  ports:
+  - port: 80
+    targetPort: 80
+    name: http
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ui-service-1-ingress
+  namespace: microvm-poc
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+  - host: dashboard.microvm-poc.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: ui-service-1
+            port:
+              number: 80

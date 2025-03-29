@@ -1,0 +1,90 @@
+# Base Lima configuration for NestJS MicroVM POC
+# Defines a minimal Ubuntu VM with Docker support.
+
+# VM Type: QEMU (default)
+# Arch: x86_64 or aarch64 (Lima detects automatically)
+
+# OS Image
+images:
+  # Try to use release-yyyyMMdd image if available. Note that release-*.lts.amd64.img exists but release-*.lts.arm64.img does not.
+  - location: "https://cloud-images.ubuntu.com/releases/22.04/release-20240125/ubuntu-22.04-server-cloudimg-amd64.img"
+    arch: "x86_64"
+    digest: "sha256:524f17d89e15658307b747a44f38ed9728f71b81f8e744ff17f191c318f6a674"
+  - location: "https://cloud-images.ubuntu.com/releases/22.04/release-20240125/ubuntu-22.04-server-cloudimg-arm64.img"
+    arch: "aarch64"
+    digest: "sha256:4131d09734321f7783166b34b4fec509a570455b088ac1503f65989750455843"
+  # Fallback to the latest release image.
+  # Hint: run `limactl prune` to invalidate the cache
+  - location: "https://cloud-images.ubuntu.com/releases/22.04/release/ubuntu-22.04-server-cloudimg-amd64.img"
+    arch: "x86_64"
+  - location: "https://cloud-images.ubuntu.com/releases/22.04/release/ubuntu-22.04-server-cloudimg-arm64.img"
+    arch: "aarch64"
+
+# Resources (adjust as needed, keeping total usage in mind for 8 VMs)
+cpus: 1
+memory: "1GiB" # Start small
+disk: "10GiB"  # Base OS + Docker + small service
+
+# Mounts (optional, can mount project code later if needed)
+# mounts:
+#  - location: "~" # Example: mount home directory
+#    writable: false
+#  - location: "." # Example: mount current directory
+#    writable: true
+
+# Enable Docker support within the VM
+containerd:
+  system: false # Use Docker CE instead of containerd
+  user: false
+
+# Networking (default is shared, might need customization later for inter-VM comms)
+# network:
+#   # Lima default network name is "lima"
+#   # You might need to define a custom network later for easier inter-VM communication
+#   vmnet: "shared" # or "bridged" or custom vde_switch socket
+
+# Port forwards (example, will need specific ports for each service later)
+# portForwards:
+#  - guestPort: 8080
+#    hostPort: 8080 # Be careful with port conflicts when running 8 VMs
+
+# Provisioning scripts (run on first boot)
+provision:
+  - mode: system # Run script as root
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      # Check if Docker is already installed
+      if command -v docker >/dev/null 2>&1; then
+        echo "Docker already installed."
+        # Ensure lima user is in docker group even if installed previously
+        usermod -aG docker lima || true # Ignore error if group/user doesn't exist yet
+        exit 0
+      fi
+      echo "Installing Docker..."
+      export DEBIAN_FRONTEND=noninteractive
+      # Update package list first
+      apt-get update
+      # Install prerequisites
+      apt-get install -y apt-transport-https ca-certificates curl software-properties-common
+      # Add Docker's official GPG key
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+      # Set up the stable repository
+      echo \
+        "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
+        $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+      # Install Docker Engine
+      apt-get update
+      apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+      # Add the default lima user to the docker group
+      usermod -aG docker lima
+      echo "Docker installation finished."
+
+# SSH settings (Lima manages keys automatically)
+ssh:
+  localPort: 0 # Auto-assign local port for SSH
+  loadDotSSHPubKeys: true # Load user's public keys
+
+# Environment variables for the VM
+# env:
+#   MY_VAR: "my_value"
