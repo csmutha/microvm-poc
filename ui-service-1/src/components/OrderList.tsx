@@ -26,8 +26,8 @@ const OrderList: React.FC = () => {
     const fetchOrders = async () => {
       try {
         setLoading(true);
-        // In a real environment, this would be the URL of the order service
-        const response = await axios.get('http://localhost:3003/api/v1/orders');
+        // Use the API gateway service name within the cluster
+        const response = await axios.get('http://api-gateway/api/v1/orders');
         setOrders(response.data);
         setError(null);
       } catch (err) {

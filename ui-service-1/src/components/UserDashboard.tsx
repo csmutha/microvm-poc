@@ -17,8 +17,8 @@ const UserDashboard: React.FC = () => {
     const fetchUsers = async () => {
       try {
         setLoading(true);
-        // In a real environment, this would be the URL of the user service
-        const response = await axios.get('http://localhost:3001/api/v1/users');
+        // Use the API gateway service name within the cluster
+        const response = await axios.get('http://api-gateway/api/v1/users');
         setUsers(response.data);
         setError(null);
       } catch (err) {

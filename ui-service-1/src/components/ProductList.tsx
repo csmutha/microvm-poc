@@ -19,8 +19,8 @@ const ProductList: React.FC = () => {
     const fetchProducts = async () => {
       try {
         setLoading(true);
-        // In a real environment, this would be the URL of the product service
-        const response = await axios.get('http://localhost:3002/api/v1/products');
+        // Use the API gateway service name within the cluster
+        const response = await axios.get('http://api-gateway/api/v1/products');
         setProducts(response.data);
         setError(null);
       } catch (err) {

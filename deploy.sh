@@ -9,7 +9,7 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 # Configuration
-REGISTRY="localhost:5000"
+REGISTRY="localhost:5001" # Default to 5001 as started below
 NAMESPACE="microvm-poc"
 VM_COUNT=8
 VM_PREFIX="microvm-poc"
@@ -57,14 +57,19 @@ build_images() {
   print_header "Building Docker images"
   
   # Start local Docker registry if not running
-  print_step "Ensuring local Docker registry is running..."
-  if ! docker ps | grep -q "registry:2"; then
+  print_step "Ensuring local Docker registry is running at ${REGISTRY}..."
+  # Check if a container named 'registry' is running and mapped to the correct host port (5001)
+  if ! docker ps --format '{{.Names}} {{.Ports}}' | grep -q "registry .*0.0.0.0:5001->5000/tcp"; then
+    # Stop and remove existing registry container if it exists but is wrong
+    docker stop registry || true
+    docker rm registry || true
+    # Start the registry container, mapping host 5001 to container 5000
     docker run -d -p 5001:5000 --restart=always --name registry registry:2
-    echo "Started local Docker registry at localhost:5001"
-    # Update registry address
-    REGISTRY="localhost:5001"
+    echo "Started local Docker registry at ${REGISTRY}"
+    # Give the registry a moment to start
+    sleep 5
   else
-    echo "Local Docker registry is already running"
+    echo "Local Docker registry is already running at ${REGISTRY}"
   fi
   
   # Build and push API services
