@@ -2,6 +2,8 @@
 
 This project demonstrates a microservices architecture using NestJS, with each REST API and UI page deployed as a separate microVM. The system is deployed using Docker and Kubernetes, with observability for monitoring and logging.
 
+🚀 Unveiling Project BrickHeal: The Ultimate AI-Powered Self-healing Architecture for Microservices! 🧱🤖
+
 ## Architecture Overview
 
 The system consists of:
