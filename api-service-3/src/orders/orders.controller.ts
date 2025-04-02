@@ -26,8 +26,12 @@ export class OrdersController {
       this.logger.log(`Getting orders for user: ${userIdNum}`);
       return this.ordersService.findByUserId(userIdNum);
     }
-    this.logger.log('Getting all orders');
-    return this.ordersService.findAll();
+    this.logger.log('Attempting to get all orders, but will throw an error');
+    // Intentionally throw an error for testing log analyzer
+    throw new Error('Simulated error fetching all orders');
+    // The original code is commented out below
+    // this.logger.log('Getting all orders');
+    // return this.ordersService.findAll();
   }
 
   @Get(':id')

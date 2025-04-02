@@ -21,8 +21,12 @@ export class UsersController {
 
   @Get()
   findAll(): User[] {
-    this.logger.log('Getting all users');
-    return this.usersService.findAll();
+    this.logger.log('Attempting to get all users, but will throw an error');
+    // Intentionally throw an error for testing log analyzer
+    throw new Error('Simulated error fetching all users');
+    // The original code is commented out below
+    // this.logger.log('Getting all users');
+    // return this.usersService.findAll();
   }
 
   @Get(':id')

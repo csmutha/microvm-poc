@@ -5,6 +5,9 @@ import ProductList from './components/ProductList';
 import OrderList from './components/OrderList';
 
 const App: React.FC = () => {
+  // Intentionally throw an error for testing log analyzer
+  throw new Error('Simulated UI rendering error');
+
   return (
     <div className="app">
       <nav className="navbar navbar-expand-lg navbar-dark bg-primary">

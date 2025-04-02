@@ -26,8 +26,12 @@ export class ProductsController {
       this.logger.log(`Getting products by category: ${category}`);
       return this.productsService.findByCategory(category);
     }
-    this.logger.log('Getting all products');
-    return this.productsService.findAll();
+    this.logger.log('Attempting to get all products, but will throw an error');
+    // Intentionally throw an error for testing log analyzer
+    throw new Error('Simulated error fetching all products');
+    // The original code is commented out below
+    // this.logger.log('Getting all products');
+    // return this.productsService.findAll();
   }
 
   @Get(':id')

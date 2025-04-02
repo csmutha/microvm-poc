@@ -75,6 +75,27 @@ services:
       - api-service-2
       - api-service-3
 
+  # Log Analyzer Service
+  log-analyzer:
+    build:
+      context: ./log-analyzer
+      dockerfile: Dockerfile
+    ports:
+      - "5002:5000" # Expose log analyzer on host port 5002, container port 5000
+    environment:
+      - FLASK_ENV=development # Optional: Set Flask environment
+      - SERVICE_NAME=log-analyzer
+      - GEMINI_API_KEY=<Replace with API key> # Added Gemini API Key
+    volumes:
+      - ./log-analyzer:/app # Mount local code for development
+    command: python app.py
+    restart: unless-stopped
+    depends_on: # Optional: Add dependencies if it needs other services running first
+      - api-service-1
+      - api-service-2
+      - api-service-3
+      - ui-service-1
+
   # We'll add more services as we create them
   # api-service-4:
   # api-service-5:
