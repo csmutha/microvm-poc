@@ -72,18 +72,37 @@ def analyze_logs_with_llm(logs):
     
     {logs}
     
-    Provide your analysis in the following JSON format:
+    Provide your analysis in the following JSON format. 
+    If "recommended_action" is "increase_resources", you MUST provide "target_cpu" AND "target_memory" with appropriate Kubernetes resource values (e.g., "1500m" for CPU, "1Gi" for memory). 
+    Otherwise, "target_cpu" and "target_memory" can be null or omitted.
+
+    Example 1: Increase resources
     {{
-        "error_detected": true/false,
-        "error_type": "one of: code_error, system_error, resource_error, network_error, unknown",
-        "severity": "one of: low, medium, high, critical",
-        "description": "detailed description of the error",
-        "recommended_action": "one of: restart_service, update_code, increase_resources, no_action",
-        "service_name": "name of the affected service",
-        "code_fix": "if code_error, provide the fix here or null"
+        "error_detected": true,
+        "error_type": "resource_error",
+        "severity": "high",
+        "description": "Service 'orders-service' is experiencing high CPU usage and OOMKilled errors.",
+        "recommended_action": "increase_resources",
+        "service_name": "orders-service",
+        "target_cpu": "1500m",
+        "target_memory": "1Gi",
+        "code_fix": null
+    }}
+
+    Example 2: Other action
+    {{
+        "error_detected": true,
+        "error_type": "code_error",
+        "severity": "critical",
+        "description": "Null pointer exception in payment processing at checkout.",
+        "recommended_action": "restart_service",
+        "service_name": "payment-service",
+        "target_cpu": null,
+        "target_memory": null,
+        "code_fix": "Possible fix: Check for null on 'user.cart.items' before accessing."
     }}
     
-    Only respond with valid JSON. No other text.
+    Only respond with a single, valid JSON object. No other text.
     """
     
     try:
@@ -135,27 +154,62 @@ def take_action(analysis):
         return {"status": "error", "message": "Missing service_name or recommended_action"}
     
     ACTION_COUNTER.labels(action_type=action).inc()
-    
-    if action == "restart_service":
-        return restart_service(service_name)
-    elif action == "update_code":
-        return update_code(service_name, analysis.get("code_fix"))
-    elif action == "increase_resources":
-        return increase_resources(service_name)
+
+    # Validate service_name by checking if the deployment exists
+    if k8s_apps_api:
+        try:
+            logger.info(f"Validating service: {service_name} in namespace: {NAMESPACE}")
+            k8s_apps_api.read_namespaced_deployment(name=service_name, namespace=NAMESPACE)
+            logger.info(f"Service {service_name} validated successfully.")
+        except client.exceptions.ApiException as e:
+            if e.status == 404:
+                logger.error(f"Deployment '{service_name}' not found in namespace '{NAMESPACE}'. Skipping action.")
+                return {"status": "error", "message": f"Deployment '{service_name}' not found."}
+            else:
+                logger.error(f"Error validating deployment '{service_name}': {str(e)}")
+                return {"status": "error", "message": f"Error validating deployment '{service_name}': {str(e)}"}
+        except Exception as e:
+            logger.error(f"Unexpected error validating deployment '{service_name}': {str(e)}")
+            return {"status": "error", "message": f"Unexpected error validating deployment '{service_name}': {str(e)}"}
     else:
-        logger.info(f"No action taken for {service_name}")
-        return {"status": "success", "message": "No action taken"}
+        logger.warning("Kubernetes client (k8s_apps_api) not initialized. Skipping service_name validation.")
+
+    action_result = None
+    logger.info(f"Invoking action '{action}' for service '{service_name}' in namespace '{NAMESPACE}'.")
+    if action == "restart_service":
+        action_result = restart_service(service_name)
+    elif action == "update_code":
+        action_result = update_code(service_name, analysis.get("code_fix"))
+    elif action == "increase_resources":
+        action_result = increase_resources(service_name, analysis)
+    else:
+        logger.info(f"No specific action configured for '{action}' on service '{service_name}'. No action taken.")
+        action_result = {"status": "success", "message": "No action taken"}
+    
+    logger.info(f"Action '{action}' for service '{service_name}' in namespace '{NAMESPACE}' completed. Result: {action_result}")
+    return action_result
 
 def restart_service(service_name):
     """
     Restart a Kubernetes deployment
     """
+    logger.info(f"Attempting to restart service: {service_name} in namespace {NAMESPACE}")
     if not k8s_apps_api:
+        logger.error(f"Cannot restart service {service_name} in namespace {NAMESPACE}: Kubernetes client not initialized.")
         return {"status": "error", "message": "Kubernetes client not initialized"}
     
     try:
+        # Backup deployment spec before making changes
+        logger.info(f"Reading deployment spec for {service_name} in namespace {NAMESPACE} for backup.")
+        deployment = k8s_apps_api.read_namespaced_deployment(
+            name=service_name,
+            namespace=NAMESPACE
+        )
+        deployment_yaml = yaml.dump(deployment.to_dict(), sort_keys=False)
+        logger.info(f"Backing up deployment spec for {service_name} in namespace {NAMESPACE}:\n{deployment_yaml}")
+
         # Scale down to 0
-        logger.info(f"Scaling down {service_name} to 0 replicas")
+        logger.info(f"Scaling down {service_name} in namespace {NAMESPACE} to 0 replicas")
         k8s_apps_api.patch_namespaced_deployment_scale(
             name=service_name,
             namespace=NAMESPACE,
@@ -166,17 +220,18 @@ def restart_service(service_name):
         time.sleep(5)
         
         # Scale back up to 1
-        logger.info(f"Scaling up {service_name} to 1 replica")
+        logger.info(f"Scaling up {service_name} in namespace {NAMESPACE} to 1 replica")
         k8s_apps_api.patch_namespaced_deployment_scale(
             name=service_name,
             namespace=NAMESPACE,
             body={"spec": {"replicas": 1}}
         )
         
+        logger.info(f"Successfully restarted service: {service_name} in namespace {NAMESPACE}")
         return {"status": "success", "message": f"Restarted {service_name}"}
     except Exception as e:
-        logger.error(f"Error restarting {service_name}: {str(e)}")
-        return {"status": "error", "message": str(e)}
+        logger.error(f"Error restarting {service_name} in namespace {NAMESPACE}: {str(e)}")
+        return {"status": "error", "message": f"Error restarting {service_name} in namespace {NAMESPACE}: {str(e)}"}
 
 def update_code(service_name, code_fix):
     """
@@ -187,23 +242,32 @@ def update_code(service_name, code_fix):
     3. Merge the PR
     4. Trigger a new deployment
     """
+    logger.info(f"Attempting to apply code update for service: {service_name} in namespace {NAMESPACE} (Code fix: {'Provided' if code_fix else 'Not provided'})")
     if not code_fix:
+        logger.warning(f"No code fix provided for service: {service_name} in namespace {NAMESPACE}. No action taken.")
         return {"status": "error", "message": "No code fix provided"}
-    
-    logger.info(f"Code fix for {service_name}: {code_fix}")
     
     # In a real implementation, you would apply the code fix here
     # For this POC, we'll just log it and simulate success
-    
-    return {"status": "success", "message": f"Code update for {service_name} initiated"}
+    logger.info(f"Simulated code update for service: {service_name} in namespace {NAMESPACE}. Code fix details: {code_fix}. In a real system, a CI/CD pipeline would be triggered.")
+    return {"status": "success", "message": f"Code update for {service_name} initiated (simulated)"}
 
-def increase_resources(service_name):
+def increase_resources(service_name, analysis):
     """
-    Increase resources for a deployment
+    Increase resources for a deployment based on target values in analysis.
     """
+    target_cpu = analysis.get("target_cpu")
+    target_memory = analysis.get("target_memory")
+    logger.info(f"Attempting to set resources for service: {service_name} in namespace {NAMESPACE} to CPU: {target_cpu}, Memory: {target_memory}")
+
     if not k8s_apps_api:
+        logger.error(f"Cannot set resources for service {service_name} in namespace {NAMESPACE}: Kubernetes client not initialized.")
         return {"status": "error", "message": "Kubernetes client not initialized"}
-    
+
+    if not target_cpu or not target_memory:
+        logger.warning(f"Target CPU or Memory not provided for {service_name} in namespace {NAMESPACE}. No action taken.")
+        return {"status": "warning", "message": "Missing target_cpu or target_memory. No action taken."}
+
     try:
         # Get current deployment
         deployment = k8s_apps_api.read_namespaced_deployment(
@@ -211,22 +275,21 @@ def increase_resources(service_name):
             namespace=NAMESPACE
         )
         
-        # Increase CPU and memory limits by 50%
+        # Log the current deployment spec as YAML before modification
+        deployment_yaml = yaml.dump(deployment.to_dict(), sort_keys=False)
+        logger.info(f"Backing up deployment spec for {service_name} in namespace {NAMESPACE} before resource change:\n{deployment_yaml}")
+
+        # Set new CPU and memory limits
         containers = deployment.spec.template.spec.containers
         for container in containers:
-            if container.resources and container.resources.limits:
-                cpu = container.resources.limits.get('cpu')
-                memory = container.resources.limits.get('memory')
-                
-                if cpu and cpu.endswith('m'):
-                    cpu_value = int(cpu[:-1])
-                    new_cpu = f"{int(cpu_value * 1.5)}m"
-                    container.resources.limits['cpu'] = new_cpu
-                
-                if memory and memory.endswith('Mi'):
-                    memory_value = int(memory[:-2])
-                    new_memory = f"{int(memory_value * 1.5)}Mi"
-                    container.resources.limits['memory'] = new_memory
+            if not container.resources:
+                container.resources = client.V1ResourceRequirements()
+            if not container.resources.limits:
+                container.resources.limits = {}
+            
+            container.resources.limits['cpu'] = target_cpu
+            container.resources.limits['memory'] = target_memory
+            logger.info(f"Setting resources for container {container.name} in deployment {service_name} (namespace {NAMESPACE}) to cpu: {target_cpu}, memory: {target_memory}")
         
         # Update deployment
         k8s_apps_api.patch_namespaced_deployment(
@@ -235,10 +298,11 @@ def increase_resources(service_name):
             body=deployment
         )
         
-        return {"status": "success", "message": f"Increased resources for {service_name}"}
+        logger.info(f"Successfully set resources for service: {service_name} in namespace {NAMESPACE} to CPU: {target_cpu}, Memory: {target_memory}")
+        return {"status": "success", "message": f"Set resources for {service_name} to cpu: {target_cpu}, memory: {target_memory}"}
     except Exception as e:
-        logger.error(f"Error increasing resources for {service_name}: {str(e)}")
-        return {"status": "error", "message": str(e)}
+        logger.error(f"Error setting resources for {service_name} in namespace {NAMESPACE}: {str(e)}")
+        return {"status": "error", "message": f"Error setting resources for {service_name} in namespace {NAMESPACE}: {str(e)}"}
 
 @app.route('/health', methods=['GET'])
 def health_check():
